@@ -22,6 +22,7 @@ import {
   testSentryAuthToken,
   useSentryProjects,
 } from '@/services/sentry'
+import { testGiteaConnection } from '@/services/gitea'
 
 const SettingsSection: React.FC<{
   title: string
@@ -66,6 +67,12 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
   >(null)
   const [showSentryAuthToken, setShowSentryAuthToken] = useState(false)
   const [isTestingSentry, setIsTestingSentry] = useState(false)
+  const [localGiteaUrl, setLocalGiteaUrl] = useState<string | null>(null)
+  const [localGiteaToken, setLocalGiteaToken] = useState<string | null>(null)
+  const [showGiteaToken, setShowGiteaToken] = useState(false)
+  const [localGiteaOwner, setLocalGiteaOwner] = useState<string | null>(null)
+  const [localGiteaRepo, setLocalGiteaRepo] = useState<string | null>(null)
+  const [isTestingGitea, setIsTestingGitea] = useState(false)
 
   const hasLinearAccess =
     !!project?.linear_api_key || !!preferences?.linear_api_key
@@ -223,6 +230,107 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
     },
     [projectId, queryClient, sentryProjects, updateSettings]
   )
+
+  const displayedGiteaUrl = localGiteaUrl ?? project?.gitea_url ?? ''
+  const giteaUrlChanged =
+    localGiteaUrl !== null && localGiteaUrl !== (project?.gitea_url ?? '')
+
+  const handleSaveGiteaUrl = useCallback(() => {
+    if (localGiteaUrl === null) return
+    updateSettings.mutate(
+      { projectId, giteaUrl: localGiteaUrl.trim() },
+      { onSuccess: () => setLocalGiteaUrl(null) }
+    )
+  }, [localGiteaUrl, projectId, updateSettings])
+
+  const handleClearGiteaUrl = useCallback(() => {
+    updateSettings.mutate(
+      { projectId, giteaUrl: '' },
+      { onSuccess: () => setLocalGiteaUrl(null) }
+    )
+  }, [projectId, updateSettings])
+
+  const displayedGiteaToken = localGiteaToken ?? project?.gitea_token ?? ''
+  const giteaTokenChanged =
+    localGiteaToken !== null && localGiteaToken !== (project?.gitea_token ?? '')
+
+  const handleSaveGiteaToken = useCallback(() => {
+    if (localGiteaToken === null) return
+    updateSettings.mutate(
+      { projectId, giteaToken: localGiteaToken.trim() },
+      { onSuccess: () => setLocalGiteaToken(null) }
+    )
+  }, [localGiteaToken, projectId, updateSettings])
+
+  const handleClearGiteaToken = useCallback(() => {
+    updateSettings.mutate(
+      { projectId, giteaToken: '' },
+      { onSuccess: () => setLocalGiteaToken(null) }
+    )
+  }, [projectId, updateSettings])
+
+  const hasGiteaConfig = !!(
+    project?.gitea_url &&
+    project?.gitea_token &&
+    project?.gitea_owner &&
+    project?.gitea_repo
+  )
+
+  const handleTestGiteaConnection = useCallback(async () => {
+    setIsTestingGitea(true)
+    try {
+      const result = await testGiteaConnection(projectId)
+      toast.success(`Connected to ${result.fullName}`)
+    } catch (error) {
+      toast.error('Gitea connection test failed', {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsTestingGitea(false)
+    }
+  }, [projectId])
+
+  const displayedGiteaOwner = localGiteaOwner ?? project?.gitea_owner ?? ''
+  const displayedGiteaRepo = localGiteaRepo ?? project?.gitea_repo ?? ''
+  const giteaRepoChanged =
+    (localGiteaOwner !== null &&
+      localGiteaOwner !== (project?.gitea_owner ?? '')) ||
+    (localGiteaRepo !== null && localGiteaRepo !== (project?.gitea_repo ?? ''))
+
+  const handleSaveGiteaRepo = useCallback(() => {
+    updateSettings.mutate(
+      {
+        projectId,
+        giteaOwner: (localGiteaOwner ?? project?.gitea_owner ?? '').trim(),
+        giteaRepo: (localGiteaRepo ?? project?.gitea_repo ?? '').trim(),
+      },
+      {
+        onSuccess: () => {
+          setLocalGiteaOwner(null)
+          setLocalGiteaRepo(null)
+        },
+      }
+    )
+  }, [
+    localGiteaOwner,
+    localGiteaRepo,
+    project?.gitea_owner,
+    project?.gitea_repo,
+    projectId,
+    updateSettings,
+  ])
+
+  const handleClearGiteaRepo = useCallback(() => {
+    updateSettings.mutate(
+      { projectId, giteaOwner: '', giteaRepo: '' },
+      {
+        onSuccess: () => {
+          setLocalGiteaOwner(null)
+          setLocalGiteaRepo(null)
+        },
+      }
+    )
+  }, [projectId, updateSettings])
 
   useEffect(() => {
     const onlyProject = sentryProjects[0]
@@ -453,6 +561,140 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
               override above.
             </p>
           )}
+        </InlineField>
+      </SettingsSection>
+
+      <SettingsSection title="Gitea Integration">
+        <InlineField
+          label="Repository"
+          description="Owner (user or organization) and repository name on your Gitea instance."
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="text"
+              placeholder="owner"
+              value={displayedGiteaOwner}
+              onChange={event => setLocalGiteaOwner(event.target.value)}
+              className="flex-1 text-base md:text-sm font-mono"
+            />
+            <span className="text-muted-foreground">/</span>
+            <Input
+              type="text"
+              placeholder="repository"
+              value={displayedGiteaRepo}
+              onChange={event => setLocalGiteaRepo(event.target.value)}
+              className="flex-1 text-base md:text-sm font-mono"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleSaveGiteaRepo}
+              disabled={!giteaRepoChanged || updateSettings.isPending}
+            >
+              Save
+            </Button>
+            {(project?.gitea_owner || project?.gitea_repo) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearGiteaRepo}
+                disabled={updateSettings.isPending}
+              >
+                <RotateCcw className="h-4 w-4" /> Remove
+              </Button>
+            )}
+          </div>
+        </InlineField>
+
+        <InlineField
+          label="Instance URL"
+          description="Base URL of your self-hosted Gitea instance, e.g. https://gitea.example.com"
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="text"
+              placeholder="https://gitea.example.com"
+              value={displayedGiteaUrl}
+              onChange={event => setLocalGiteaUrl(event.target.value)}
+              className="flex-1 text-base md:text-sm font-mono"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleSaveGiteaUrl}
+              disabled={!giteaUrlChanged || updateSettings.isPending}
+            >
+              Save
+            </Button>
+            {project?.gitea_url && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearGiteaUrl}
+                disabled={updateSettings.isPending}
+              >
+                <RotateCcw className="h-4 w-4" /> Remove
+              </Button>
+            )}
+          </div>
+        </InlineField>
+
+        <InlineField
+          label="Personal Access Token"
+          description="Generated in Gitea under Settings → Applications. Needs read access to issues, pull requests and actions."
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type={showGiteaToken ? 'text' : 'password'}
+              placeholder="Gitea access token"
+              value={displayedGiteaToken}
+              onChange={event => setLocalGiteaToken(event.target.value)}
+              className="flex-1 text-base md:text-sm font-mono"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowGiteaToken(!showGiteaToken)}
+            >
+              {showGiteaToken ? 'Hide' : 'Show'}
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleSaveGiteaToken}
+              disabled={!giteaTokenChanged || updateSettings.isPending}
+            >
+              Save
+            </Button>
+            {project?.gitea_token && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearGiteaToken}
+                disabled={updateSettings.isPending}
+              >
+                <RotateCcw className="h-4 w-4" /> Remove
+              </Button>
+            )}
+          </div>
+        </InlineField>
+
+        <InlineField
+          label="Connection"
+          description="Verifies the URL, token, owner, and repo above by fetching the repository."
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleTestGiteaConnection}
+            disabled={!hasGiteaConfig || isTestingGitea}
+          >
+            {isTestingGitea && <Loader2 className="h-4 w-4 animate-spin" />}
+            Test Connection
+          </Button>
         </InlineField>
       </SettingsSection>
     </div>

@@ -169,6 +169,21 @@ pub struct Project {
     /// Sentry project slug mapped to this Jean project
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sentry_project_slug: Option<String>,
+    /// Base URL of the self-hosted Gitea instance for this project (e.g. "https://gitea.example.com")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitea_url: Option<String>,
+    /// Gitea personal access token used to authenticate REST API requests
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitea_token: Option<String>,
+    /// Gitea repository owner (user or organization) mapped to this Jean project.
+    /// Set explicitly rather than parsed from the git remote, since self-hosted
+    /// instances often expose a different host over SSH (e.g. an internal Docker
+    /// address) than the public API/browser URL in `gitea_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitea_owner: Option<String>,
+    /// Gitea repository name mapped to this Jean project
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitea_repo: Option<String>,
     /// IDs of linked projects for cross-project context sharing
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_project_ids: Vec<String>,

@@ -484,6 +484,10 @@ pub struct ContextReferences {
     pub linear: std::collections::HashMap<String, ContextRef>,
     #[serde(default)]
     pub sentry: std::collections::HashMap<String, ContextRef>,
+    #[serde(default)]
+    pub gitea_issues: std::collections::HashMap<String, ContextRef>,
+    #[serde(default)]
+    pub gitea_prs: std::collections::HashMap<String, ContextRef>,
 }
 
 /// Get the directory for shared GitHub contexts
@@ -1137,6 +1141,72 @@ pub fn cleanup_orphaned_contexts(
             }
         }
         refs.advisories.remove(key);
+    }
+
+    // Clean up orphaned Gitea issues
+    let gitea_issues_to_remove: Vec<String> = refs
+        .gitea_issues
+        .iter()
+        .filter_map(|(key, entry)| {
+            if let Some(orphaned_at) = entry.orphaned_at {
+                if orphaned_at + retention_secs < now {
+                    return Some(key.clone());
+                }
+            }
+            None
+        })
+        .collect();
+
+    for key in &gitea_issues_to_remove {
+        // File format: gitea-{repo_key}-issue-{number}.md
+        // Key format: {repo_key}-{number}
+        if let Some(last_dash) = key.rfind('-') {
+            let repo_key = &key[..last_dash];
+            let number = &key[last_dash + 1..];
+            let filename = format!("gitea-{repo_key}-issue-{number}.md");
+            let file_path = contexts_dir.join(&filename);
+            if file_path.exists() {
+                if let Err(e) = std::fs::remove_file(&file_path) {
+                    log::warn!("Failed to remove orphaned Gitea issue context {filename}: {e}");
+                } else {
+                    deleted_count += 1;
+                }
+            }
+        }
+        refs.gitea_issues.remove(key);
+    }
+
+    // Clean up orphaned Gitea PRs
+    let gitea_prs_to_remove: Vec<String> = refs
+        .gitea_prs
+        .iter()
+        .filter_map(|(key, entry)| {
+            if let Some(orphaned_at) = entry.orphaned_at {
+                if orphaned_at + retention_secs < now {
+                    return Some(key.clone());
+                }
+            }
+            None
+        })
+        .collect();
+
+    for key in &gitea_prs_to_remove {
+        // File format: gitea-{repo_key}-pr-{number}.md
+        // Key format: {repo_key}-{number}
+        if let Some(last_dash) = key.rfind('-') {
+            let repo_key = &key[..last_dash];
+            let number = &key[last_dash + 1..];
+            let filename = format!("gitea-{repo_key}-pr-{number}.md");
+            let file_path = contexts_dir.join(&filename);
+            if file_path.exists() {
+                if let Err(e) = std::fs::remove_file(&file_path) {
+                    log::warn!("Failed to remove orphaned Gitea PR context {filename}: {e}");
+                } else {
+                    deleted_count += 1;
+                }
+            }
+        }
+        refs.gitea_prs.remove(key);
     }
 
     save_context_references(app, &refs)?;

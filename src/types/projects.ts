@@ -85,6 +85,14 @@ export interface Project {
   sentry_organization_slug?: string | null
   /** Sentry project slug */
   sentry_project_slug?: string | null
+  /** Base URL of the self-hosted Gitea instance for this project */
+  gitea_url?: string | null
+  /** Gitea personal access token used to authenticate REST API requests */
+  gitea_token?: string | null
+  /** Gitea repository owner (user or organization) mapped to this Jean project */
+  gitea_owner?: string | null
+  /** Gitea repository name mapped to this Jean project */
+  gitea_repo?: string | null
   /** IDs of linked projects for cross-project context sharing */
   linked_project_ids?: string[]
   /** Per-project automated issue fixing settings */

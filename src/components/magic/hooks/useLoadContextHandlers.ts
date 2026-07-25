@@ -40,7 +40,15 @@ interface LinearIssueContextContent {
 }
 
 export interface ViewingContext {
-  type: 'issue' | 'pr' | 'security' | 'advisory' | 'saved' | 'linear'
+  type:
+    | 'issue'
+    | 'pr'
+    | 'security'
+    | 'advisory'
+    | 'saved'
+    | 'linear'
+    | 'gitea-issue'
+    | 'gitea-pr'
   number?: number
   ghsaId?: string
   slug?: string

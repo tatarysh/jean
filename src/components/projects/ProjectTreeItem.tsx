@@ -31,6 +31,8 @@ import {
 import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
 import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
 import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
+import { GiteaIssuesBadge } from '@/components/shared/GiteaIssuesBadge'
+import { GiteaPRsBadge } from '@/components/shared/GiteaPRsBadge'
 import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import {
   Tooltip,
@@ -373,6 +375,14 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
                 projectId={project.id}
               />
               <FailedRunsBadge projectPath={project.path} />
+              <GiteaIssuesBadge
+                projectId={project.id}
+                giteaUrl={project.gitea_url}
+              />
+              <GiteaPRsBadge
+                projectId={project.id}
+                giteaUrl={project.gitea_url}
+              />
             </div>
           )}
 

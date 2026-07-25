@@ -114,6 +114,8 @@ import type { LabelData, Session, WorktreeSessions } from '@/types/chat'
 import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
 import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
 import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
+import { GiteaIssuesBadge } from '@/components/shared/GiteaIssuesBadge'
+import { GiteaPRsBadge } from '@/components/shared/GiteaPRsBadge'
 import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import { PlanDialog } from '@/components/chat/PlanDialog'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
@@ -2953,6 +2955,14 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                     projectId={projectId}
                   />
                   <FailedRunsBadge projectPath={project.path} />
+                  <GiteaIssuesBadge
+                    projectId={projectId}
+                    giteaUrl={project.gitea_url}
+                  />
+                  <GiteaPRsBadge
+                    projectId={projectId}
+                    giteaUrl={project.gitea_url}
+                  />
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

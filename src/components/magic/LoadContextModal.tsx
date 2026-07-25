@@ -22,18 +22,29 @@ import { Markdown } from '@/components/ui/markdown'
 import { cn } from '@/lib/utils'
 import { usePreferences } from '@/services/preferences'
 import { useGhLogin } from '@/hooks/useGhLogin'
+import { useProjects } from '@/services/projects'
 import { IssuePreviewModal } from '@/components/worktree/IssuePreviewModal'
 import { githubQueryKeys } from '@/services/github'
 import { linearQueryKeys } from '@/services/linear'
+import { giteaQueryKeys } from '@/services/gitea'
 import { GitHubItemsTab } from './GitHubItemsTab'
+import { GiteaItemsTab } from './GiteaItemsTab'
 import { SecurityAlertsTab } from './SecurityAlertsTab'
 import { LinearItemsTab } from './LinearItemsTab'
 import { ContextsTab } from './ContextsTab'
 import { useLoadContextData } from './hooks/useLoadContextData'
 import { useLoadContextHandlers } from './hooks/useLoadContextHandlers'
 import { useLoadContextKeyboard } from './hooks/useLoadContextKeyboard'
+import { useGiteaLoadContext } from './hooks/useGiteaLoadContext'
 
-type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear'
+type TabId =
+  | 'issues'
+  | 'prs'
+  | 'security'
+  | 'contexts'
+  | 'linear'
+  | 'gitea-issues'
+  | 'gitea-prs'
 
 interface Tab {
   id: TabId
@@ -42,12 +53,17 @@ interface Tab {
   icon: LucideIcon
 }
 
-const TABS: Tab[] = [
+const BASE_TABS: Tab[] = [
   { id: 'contexts', label: 'Contexts', key: '1', icon: Bookmark },
   { id: 'issues', label: 'Issues', key: '2', icon: CircleDot },
   { id: 'prs', label: 'PRs', key: '3', icon: GitPullRequest },
   { id: 'security', label: 'Security', key: '4', icon: Shield },
   { id: 'linear', label: 'Linear', key: '5', icon: LinearIcon },
+]
+
+const GITEA_TABS: Tab[] = [
+  { id: 'gitea-issues', label: 'Gitea Issues', key: '6', icon: CircleDot },
+  { id: 'gitea-prs', label: 'Gitea PRs', key: '7', icon: GitPullRequest },
 ]
 
 interface LoadContextModalProps {
@@ -72,6 +88,10 @@ export function LoadContextModal({
   const queryClient = useQueryClient()
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
   const { data: preferences } = usePreferences()
+  const { data: projects } = useProjects()
+  const project = projects?.find(p => p.id === projectId)
+  const hasGitea = !!project?.gitea_url
+  const TABS = hasGitea ? [...BASE_TABS, ...GITEA_TABS] : BASE_TABS
 
   // Navigation state
   const [activeTab, setActiveTab] = useState<TabId>('issues')
@@ -112,6 +132,18 @@ export function LoadContextModal({
     refetchContexts: data.refetchContexts,
     renameMutation: data.renameMutation,
     preferences,
+    onClearSearch,
+  })
+
+  // Gitea data + handlers layer (separate from GitHub's, gated on project.gitea_url)
+  const giteaData = useGiteaLoadContext({
+    open,
+    projectId,
+    activeSessionId,
+    worktreeId,
+    searchQuery,
+    includeClosed,
+    setViewingContext: handlers.setViewingContext,
     onClearSearch,
   })
 
@@ -159,6 +191,10 @@ export function LoadContextModal({
         setActiveTab('security')
       } else if (data.hasLoadedLinearContexts) {
         setActiveTab('linear')
+      } else if (giteaData.hasLoadedGiteaIssueContexts) {
+        setActiveTab('gitea-issues')
+      } else if (giteaData.hasLoadedGiteaPRContexts) {
+        setActiveTab('gitea-prs')
       } else {
         setActiveTab('contexts')
       }
@@ -167,8 +203,23 @@ export function LoadContextModal({
       setIncludeClosed(false)
       setSelectedIndex(0)
       handlers.resetState()
+      giteaData.resetGiteaState()
 
       // Invalidate caches to fetch fresh data
+      if (projectId && hasGitea) {
+        queryClient.invalidateQueries({
+          queryKey: giteaQueryKeys.issues(projectId, 'open'),
+        })
+        queryClient.invalidateQueries({
+          queryKey: giteaQueryKeys.issues(projectId, 'all'),
+        })
+        queryClient.invalidateQueries({
+          queryKey: giteaQueryKeys.prs(projectId, 'open'),
+        })
+        queryClient.invalidateQueries({
+          queryKey: giteaQueryKeys.prs(projectId, 'all'),
+        })
+      }
       if (worktreePath) {
         queryClient.invalidateQueries({
           queryKey: githubQueryKeys.issues(worktreePath, 'open'),
@@ -240,6 +291,14 @@ export function LoadContextModal({
       queryClient.invalidateQueries({
         queryKey: linearQueryKeys.loadedContexts(activeSessionId),
       })
+      if (hasGitea && projectId) {
+        queryClient.invalidateQueries({
+          queryKey: giteaQueryKeys.loadedIssueContexts(activeSessionId),
+        })
+        queryClient.invalidateQueries({
+          queryKey: giteaQueryKeys.loadedPrContexts(activeSessionId),
+        })
+      }
     }
 
     prevOpenRef.current = open
@@ -248,6 +307,7 @@ export function LoadContextModal({
     worktreePath,
     activeSessionId,
     projectId,
+    hasGitea,
     queryClient,
     data.hasLoadedIssueContexts,
     data.hasLoadedPRContexts,
@@ -255,6 +315,9 @@ export function LoadContextModal({
     data.hasLoadedAdvisoryContexts,
     data.hasLoadedLinearContexts,
     data.hasAttachedContexts,
+    giteaData.hasLoadedGiteaIssueContexts,
+    giteaData.hasLoadedGiteaPRContexts,
+    giteaData.resetGiteaState,
     handlers.resetState,
   ])
 
@@ -476,6 +539,68 @@ export function LoadContextModal({
             />
           )}
 
+          {activeTab === 'gitea-issues' && (
+            <GiteaItemsTab
+              config={{
+                kind: 'gitea-issues',
+                loadedContexts: giteaData.loadedGiteaIssueContexts ?? [],
+                filteredItems: giteaData.filteredGiteaIssues,
+                onSelectItem: giteaData.handleSelectGiteaIssue,
+                onViewItem: giteaData.handleViewGiteaIssue,
+                onRemoveItem: giteaData.handleRemoveGiteaIssue,
+                onLoadItem: (num, refresh) =>
+                  giteaData.handleLoadGiteaIssue(num, refresh),
+              }}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              includeClosed={includeClosed}
+              setIncludeClosed={setIncludeClosed}
+              searchInputRef={searchInputRef}
+              isLoadingContexts={giteaData.isLoadingGiteaIssueContexts}
+              isLoading={giteaData.isLoadingGiteaIssues}
+              isRefetching={giteaData.isRefetchingGiteaIssues}
+              isSearching={giteaData.isSearchingGiteaIssues}
+              error={giteaData.giteaIssuesError}
+              onRefresh={() => giteaData.refetchGiteaIssues()}
+              selectedIndex={selectedIndex}
+              setSelectedIndex={setSelectedIndex}
+              loadingNumbers={giteaData.loadingGiteaNumbers}
+              removingNumbers={giteaData.removingGiteaNumbers}
+              hasLoadedContexts={giteaData.hasLoadedGiteaIssueContexts}
+            />
+          )}
+
+          {activeTab === 'gitea-prs' && (
+            <GiteaItemsTab
+              config={{
+                kind: 'gitea-prs',
+                loadedContexts: giteaData.loadedGiteaPRContexts ?? [],
+                filteredItems: giteaData.filteredGiteaPRs,
+                onSelectItem: giteaData.handleSelectGiteaPR,
+                onViewItem: giteaData.handleViewGiteaPR,
+                onRemoveItem: giteaData.handleRemoveGiteaPR,
+                onLoadItem: (num, refresh) =>
+                  giteaData.handleLoadGiteaPR(num, refresh),
+              }}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              includeClosed={includeClosed}
+              setIncludeClosed={setIncludeClosed}
+              searchInputRef={searchInputRef}
+              isLoadingContexts={giteaData.isLoadingGiteaPRContexts}
+              isLoading={giteaData.isLoadingGiteaPRs}
+              isRefetching={giteaData.isRefetchingGiteaPRs}
+              isSearching={giteaData.isSearchingGiteaPRs}
+              error={giteaData.giteaPRsError}
+              onRefresh={() => giteaData.refetchGiteaPRs()}
+              selectedIndex={selectedIndex}
+              setSelectedIndex={setSelectedIndex}
+              loadingNumbers={giteaData.loadingGiteaNumbers}
+              removingNumbers={giteaData.removingGiteaNumbers}
+              hasLoadedContexts={giteaData.hasLoadedGiteaPRContexts}
+            />
+          )}
+
           {activeTab === 'contexts' && (
             <ContextsTab
               searchQuery={searchQuery}
@@ -532,12 +657,14 @@ export function LoadContextModal({
             />
           )}
 
-        {/* Security/Advisory/Saved context viewer modal */}
+        {/* Security/Advisory/Saved/Gitea context viewer modal */}
         {handlers.viewingContext &&
           (handlers.viewingContext.type === 'saved' ||
             handlers.viewingContext.type === 'security' ||
             handlers.viewingContext.type === 'advisory' ||
-            handlers.viewingContext.type === 'linear') && (
+            handlers.viewingContext.type === 'linear' ||
+            handlers.viewingContext.type === 'gitea-issue' ||
+            handlers.viewingContext.type === 'gitea-pr') && (
             <Dialog
               open={true}
               onOpenChange={() => handlers.setViewingContext(null)}
@@ -551,6 +678,10 @@ export function LoadContextModal({
                       <ShieldAlert className="h-4 w-4 text-orange-500" />
                     ) : handlers.viewingContext.type === 'linear' ? (
                       <LinearIcon className="h-4 w-4 text-violet-500" />
+                    ) : handlers.viewingContext.type === 'gitea-issue' ? (
+                      <CircleDot className="h-4 w-4 text-green-500" />
+                    ) : handlers.viewingContext.type === 'gitea-pr' ? (
+                      <GitPullRequest className="h-4 w-4 text-green-500" />
                     ) : (
                       <FolderOpen className="h-4 w-4 text-blue-500" />
                     )}

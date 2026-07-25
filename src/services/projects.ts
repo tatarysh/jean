@@ -2695,6 +2695,10 @@ export function useUpdateProjectSettings() {
       sentryAuthToken,
       sentryOrganizationSlug,
       sentryProjectSlug,
+      giteaUrl,
+      giteaToken,
+      giteaOwner,
+      giteaRepo,
       autoFixSettings,
     }: {
       projectId: string
@@ -2711,6 +2715,10 @@ export function useUpdateProjectSettings() {
       sentryAuthToken?: string
       sentryOrganizationSlug?: string
       sentryProjectSlug?: string
+      giteaUrl?: string
+      giteaToken?: string
+      giteaOwner?: string
+      giteaRepo?: string
       autoFixSettings?: Project['auto_fix_settings']
       linkedProjectIds?: string[]
     }): Promise<Project> => {
@@ -2738,6 +2746,10 @@ export function useUpdateProjectSettings() {
         sentryAuthToken,
         sentryOrganizationSlug,
         sentryProjectSlug,
+        giteaUrl,
+        giteaToken,
+        giteaOwner,
+        giteaRepo,
         autoFixSettings,
         linkedProjectIds,
       })

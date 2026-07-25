@@ -5,6 +5,7 @@ import { appearanceCommands } from './appearance-commands'
 import { notificationCommands } from './notification-commands'
 import { projectCommands } from './project-commands'
 import { githubCommands } from './github-commands'
+import { giteaCommands } from './gitea-commands'
 import { maintenanceCommands } from './maintenance-commands'
 import { windowCommands } from './window-commands'
 import { registerCommands } from './registry'
@@ -18,6 +19,7 @@ export function initializeCommandSystem(): void {
   registerCommands(notificationCommands)
   registerCommands(projectCommands)
   registerCommands(githubCommands)
+  registerCommands(giteaCommands)
   registerCommands(maintenanceCommands)
   registerCommands(windowCommands)
 }
@@ -27,6 +29,7 @@ export {
   notificationCommands,
   projectCommands,
   githubCommands,
+  giteaCommands,
   maintenanceCommands,
   windowCommands,
 }

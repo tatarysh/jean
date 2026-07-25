@@ -297,6 +297,10 @@ pub async fn dispatch_command(
                 field_opt(&args, "sentryOrganizationSlug", "sentry_organization_slug")?;
             let sentry_project_slug: Option<String> =
                 field_opt(&args, "sentryProjectSlug", "sentry_project_slug")?;
+            let gitea_url: Option<String> = field_opt(&args, "giteaUrl", "gitea_url")?;
+            let gitea_token: Option<String> = field_opt(&args, "giteaToken", "gitea_token")?;
+            let gitea_owner: Option<String> = field_opt(&args, "giteaOwner", "gitea_owner")?;
+            let gitea_repo: Option<String> = field_opt(&args, "giteaRepo", "gitea_repo")?;
             let linked_project_ids: Option<Vec<String>> =
                 field_opt(&args, "linkedProjectIds", "linked_project_ids")?;
             let auto_fix_settings: Option<Option<crate::projects::types::ProjectAutoFixSettings>> =
@@ -317,6 +321,10 @@ pub async fn dispatch_command(
                 sentry_auth_token,
                 sentry_organization_slug,
                 sentry_project_slug,
+                gitea_url,
+                gitea_token,
+                gitea_owner,
+                gitea_repo,
                 linked_project_ids,
                 auto_fix_settings,
             )
@@ -858,6 +866,185 @@ pub async fn dispatch_command(
                 project_path,
             )
             .await?;
+            to_value(result)
+        }
+
+        // =====================================================================
+        // Gitea Issues / PRs / Actions
+        // =====================================================================
+        "list_gitea_issues" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let state: Option<String> = from_field_opt(&args, "state")?;
+            let result = crate::projects::list_gitea_issues(app.clone(), project_id, state).await?;
+            to_value(result)
+        }
+        "search_gitea_issues" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let query: String = from_field(&args, "query")?;
+            let result =
+                crate::projects::search_gitea_issues(app.clone(), project_id, query).await?;
+            to_value(result)
+        }
+        "get_gitea_issue_by_number" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let result =
+                crate::projects::get_gitea_issue_by_number(app.clone(), project_id, issue_number)
+                    .await?;
+            to_value(result)
+        }
+        "get_gitea_issue" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let result =
+                crate::projects::get_gitea_issue(app.clone(), project_id, issue_number).await?;
+            to_value(result)
+        }
+        "list_gitea_prs" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let state: Option<String> = from_field_opt(&args, "state")?;
+            let result = crate::projects::list_gitea_prs(app.clone(), project_id, state).await?;
+            to_value(result)
+        }
+        "search_gitea_prs" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let query: String = from_field(&args, "query")?;
+            let result = crate::projects::search_gitea_prs(app.clone(), project_id, query).await?;
+            to_value(result)
+        }
+        "get_gitea_pr_by_number" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let result =
+                crate::projects::get_gitea_pr_by_number(app.clone(), project_id, pr_number).await?;
+            to_value(result)
+        }
+        "get_gitea_pr" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let result = crate::projects::get_gitea_pr(app.clone(), project_id, pr_number).await?;
+            to_value(result)
+        }
+        "get_gitea_pr_review_comments" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let result =
+                crate::projects::get_gitea_pr_review_comments(app.clone(), project_id, pr_number)
+                    .await?;
+            to_value(result)
+        }
+        "load_gitea_issue_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::load_gitea_issue_context(
+                app.clone(),
+                session_id,
+                issue_number,
+                project_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "list_loaded_gitea_issue_contexts" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
+            let result = crate::projects::list_loaded_gitea_issue_contexts(
+                app.clone(),
+                session_id,
+                worktree_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "remove_gitea_issue_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            crate::projects::remove_gitea_issue_context(
+                app.clone(),
+                session_id,
+                issue_number,
+                project_id,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["contexts"]);
+            Ok(Value::Null)
+        }
+        "get_gitea_issue_context_content" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::get_gitea_issue_context_content(
+                app.clone(),
+                session_id,
+                issue_number,
+                project_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "load_gitea_pr_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::load_gitea_pr_context(
+                app.clone(),
+                session_id,
+                pr_number,
+                project_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "list_loaded_gitea_pr_contexts" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
+            let result = crate::projects::list_loaded_gitea_pr_contexts(
+                app.clone(),
+                session_id,
+                worktree_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "remove_gitea_pr_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            crate::projects::remove_gitea_pr_context(
+                app.clone(),
+                session_id,
+                pr_number,
+                project_id,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["contexts"]);
+            Ok(Value::Null)
+        }
+        "get_gitea_pr_context_content" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::get_gitea_pr_context_content(
+                app.clone(),
+                session_id,
+                pr_number,
+                project_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "test_gitea_connection" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::test_gitea_connection(app.clone(), project_id).await?;
+            to_value(result)
+        }
+        "list_gitea_workflow_runs" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let branch: Option<String> = from_field_opt(&args, "branch")?;
+            let result =
+                crate::projects::list_gitea_workflow_runs(app.clone(), project_id, branch).await?;
             to_value(result)
         }
 

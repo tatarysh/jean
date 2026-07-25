@@ -746,6 +746,10 @@ pub async fn add_project(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        gitea_url: None,
+        gitea_token: None,
+        gitea_owner: None,
+        gitea_repo: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     };
@@ -906,6 +910,10 @@ pub async fn init_project(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        gitea_url: None,
+        gitea_token: None,
+        gitea_owner: None,
+        gitea_repo: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     };
@@ -964,6 +972,10 @@ pub async fn clone_project(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        gitea_url: None,
+        gitea_token: None,
+        gitea_owner: None,
+        gitea_repo: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     };
@@ -5628,6 +5640,10 @@ pub async fn update_project_settings(
     sentry_auth_token: Option<String>,
     sentry_organization_slug: Option<String>,
     sentry_project_slug: Option<String>,
+    gitea_url: Option<String>,
+    gitea_token: Option<String>,
+    gitea_owner: Option<String>,
+    gitea_repo: Option<String>,
     linked_project_ids: Option<Vec<String>>,
     auto_fix_settings: Option<Option<ProjectAutoFixSettings>>,
 ) -> Result<Project, String> {
@@ -5723,6 +5739,30 @@ pub async fn update_project_settings(
     if let Some(slug) = sentry_project_slug {
         let slug = slug.trim().to_string();
         project.sentry_project_slug = if slug.is_empty() { None } else { Some(slug) };
+    }
+
+    if let Some(url) = gitea_url {
+        let url = url.trim().trim_end_matches('/').to_string();
+        log::trace!("Updating Gitea URL: {url:?}");
+        project.gitea_url = if url.is_empty() { None } else { Some(url) };
+    }
+
+    if let Some(token) = gitea_token {
+        let token = token.trim().to_string();
+        log::trace!("Updating Gitea token ({} chars)", token.len());
+        project.gitea_token = if token.is_empty() { None } else { Some(token) };
+    }
+
+    if let Some(owner) = gitea_owner {
+        let owner = owner.trim().to_string();
+        log::trace!("Updating Gitea owner: {owner:?}");
+        project.gitea_owner = if owner.is_empty() { None } else { Some(owner) };
+    }
+
+    if let Some(repo) = gitea_repo {
+        let repo = repo.trim().to_string();
+        log::trace!("Updating Gitea repo: {repo:?}");
+        project.gitea_repo = if repo.is_empty() { None } else { Some(repo) };
     }
 
     if let Some(settings) = auto_fix_settings {
@@ -11915,6 +11955,10 @@ pub async fn create_folder(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        gitea_url: None,
+        gitea_token: None,
+        gitea_owner: None,
+        gitea_repo: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     };
@@ -13703,6 +13747,10 @@ mod tests {
             sentry_auth_token: None,
             sentry_organization_slug: None,
             sentry_project_slug: None,
+            gitea_url: None,
+            gitea_token: None,
+            gitea_owner: None,
+            gitea_repo: None,
             linked_project_ids: Vec::new(),
             auto_fix_settings: None,
         };
