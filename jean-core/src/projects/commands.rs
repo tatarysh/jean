@@ -22,24 +22,19 @@ use super::git::get_repo_identifier;
 use super::github_issues::{
     add_advisory_reference, add_issue_reference, add_pr_reference, add_security_reference,
     format_advisory_context_markdown, format_issue_context_markdown, format_pr_context_markdown,
-    format_security_context_markdown, generate_branch_name_from_advisory,
-    generate_branch_name_from_issue, generate_branch_name_from_security_alert,
-    get_github_contexts_dir, get_github_pr, get_github_pr_by_number, get_pr_diff,
-    get_session_context_content, get_session_context_numbers, AdvisoryContext, IssueContext,
-    PullRequestContext, SecurityAlertContext,
+    format_security_context_markdown, get_github_contexts_dir, get_github_pr,
+    get_github_pr_by_number, get_pr_diff, get_session_context_content,
+    get_session_context_numbers, AdvisoryContext, IssueContext, PullRequestContext,
+    SecurityAlertContext,
 };
 use super::linear_issues::{
-    add_linear_reference, format_linear_issue_context_markdown,
-    generate_branch_name_from_linear_issue, get_session_linear_identifiers,
+    add_linear_reference, format_linear_issue_context_markdown, get_session_linear_identifiers,
     linear_context_to_detail, LinearIssueContext,
 };
 use super::names::generate_unique_workspace_name;
 use super::release_notes::{
     build_pr_prompt_context_from_revision_range, build_release_notes_prompt_context,
     format_issue_groups, PrIssueRefsMap,
-};
-use super::sentry_issues::{
-    add_sentry_reference, generate_branch_name_from_sentry_issue, SentryIssueContext,
 };
 use super::storage::{get_project_worktrees_dir, load_projects_data, save_projects_data};
 use super::types::{
@@ -49,6 +44,7 @@ use super::types::{
     WorktreeDeletingEvent, WorktreeOrigin, WorktreePathExistsEvent,
     WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent, WorktreeUnarchivedEvent,
 };
+use super::worktree_context::WorktreeContextSource;
 use crate::chat::types::{LabelData, Session, SessionMetadata, WorktreeSessions};
 use crate::claude_cli::resolve_cli_binary;
 use crate::coderabbit_cli::resolve_coderabbit_binary;
@@ -258,7 +254,7 @@ pub fn generate_unique_suffix_name(
     }
 }
 
-fn generate_pr_worktree_name(pr_number: u32, head_ref_name: &str) -> String {
+pub(super) fn generate_pr_worktree_name(pr_number: u32, head_ref_name: &str) -> String {
     let sanitized_head = sanitize_folder_name(head_ref_name);
     if sanitized_head.is_empty() {
         format!("pr-{pr_number}")
@@ -1503,12 +1499,7 @@ pub async fn create_worktree(
     app: AppHandle,
     project_id: String,
     base_branch: Option<String>,
-    issue_context: Option<IssueContext>,
-    pr_context: Option<PullRequestContext>,
-    security_context: Option<SecurityAlertContext>,
-    advisory_context: Option<AdvisoryContext>,
-    linear_context: Option<LinearIssueContext>,
-    sentry_context: Option<SentryIssueContext>,
+    context_source: Option<WorktreeContextSource>,
     custom_name: Option<String>,
     auto_open_in_jean: Option<bool>,
     origin: Option<String>,
@@ -1535,8 +1526,9 @@ pub async fn create_worktree(
     // default (main). Otherwise status shows huge behind/ahead counts against
     // main and the wrong "stacked on" PR can appear for long-lived bases.
     let preferred_base = base_branch.unwrap_or_else(|| {
-        pr_context
+        context_source
             .as_ref()
+            .and_then(|c| c.pr_context())
             .map(|ctx| ctx.base_ref_name.clone())
             .filter(|b| !b.is_empty())
             .unwrap_or_else(|| project.default_branch.clone())
@@ -1563,7 +1555,7 @@ pub async fn create_worktree(
     };
 
     // Resolve auto-pull preference now (async), but defer the actual pull to background thread
-    let should_auto_pull = if pr_context.is_none() {
+    let should_auto_pull = if context_source.as_ref().and_then(|c| c.pr_context()).is_none() {
         crate::load_preferences(app.clone())
             .await
             .map(|prefs| prefs.auto_pull_base_branch)
@@ -1572,97 +1564,25 @@ pub async fn create_worktree(
         false
     };
 
-    // Generate workspace name - use custom name, PR-based name, issue-based name, or random name
+    // Generate workspace name - use custom name, context-source-based name, or random name
     let name = if let Some(custom) = custom_name {
         // Use the provided custom name. Uniqueness is enforced downstream via
         // worktree:branch_exists / worktree:path_exists events (BranchConflictDialog).
         custom
-    } else if let Some(ref ctx) = pr_context {
-        let pr_branch = generate_pr_worktree_name(ctx.number, &ctx.head_ref_name);
+    } else if let Some(ref source) = context_source {
+        let base_name = source.generate_branch_name();
         // Check if this branch name already exists, if so, add a suffix
-        if data.worktree_name_exists(&project_id, &pr_branch) {
+        if data.worktree_name_exists(&project_id, &base_name) {
             let mut counter = 2;
             loop {
-                let candidate = format!("{pr_branch}-{counter}");
+                let candidate = format!("{base_name}-{counter}");
                 if !data.worktree_name_exists(&project_id, &candidate) {
                     break candidate;
                 }
                 counter += 1;
             }
         } else {
-            pr_branch
-        }
-    } else if let Some(ref ctx) = security_context {
-        let security_branch =
-            generate_branch_name_from_security_alert(ctx.number, &ctx.package_name, &ctx.summary);
-        if data.worktree_name_exists(&project_id, &security_branch) {
-            let mut counter = 2;
-            loop {
-                let candidate = format!("{security_branch}-{counter}");
-                if !data.worktree_name_exists(&project_id, &candidate) {
-                    break candidate;
-                }
-                counter += 1;
-            }
-        } else {
-            security_branch
-        }
-    } else if let Some(ref ctx) = advisory_context {
-        let advisory_branch = generate_branch_name_from_advisory(&ctx.ghsa_id, &ctx.summary);
-        if data.worktree_name_exists(&project_id, &advisory_branch) {
-            let mut counter = 2;
-            loop {
-                let candidate = format!("{advisory_branch}-{counter}");
-                if !data.worktree_name_exists(&project_id, &candidate) {
-                    break candidate;
-                }
-                counter += 1;
-            }
-        } else {
-            advisory_branch
-        }
-    } else if let Some(ref ctx) = linear_context {
-        let linear_branch = generate_branch_name_from_linear_issue(&ctx.identifier, &ctx.title);
-        if data.worktree_name_exists(&project_id, &linear_branch) {
-            let mut counter = 2;
-            loop {
-                let candidate = format!("{linear_branch}-{counter}");
-                if !data.worktree_name_exists(&project_id, &candidate) {
-                    break candidate;
-                }
-                counter += 1;
-            }
-        } else {
-            linear_branch
-        }
-    } else if let Some(ref ctx) = sentry_context {
-        let sentry_branch = generate_branch_name_from_sentry_issue(&ctx.short_id, &ctx.title);
-        if data.worktree_name_exists(&project_id, &sentry_branch) {
-            let mut counter = 2;
-            loop {
-                let candidate = format!("{sentry_branch}-{counter}");
-                if !data.worktree_name_exists(&project_id, &candidate) {
-                    break candidate;
-                }
-                counter += 1;
-            }
-        } else {
-            sentry_branch
-        }
-    } else if let Some(ref ctx) = issue_context {
-        let issue_branch = generate_branch_name_from_issue(ctx.number, &ctx.title);
-        // Check if this branch name already exists, if so, add a suffix
-        if data.worktree_name_exists(&project_id, &issue_branch) {
-            let mut counter = 2;
-            loop {
-                let candidate = format!("{issue_branch}-{counter}");
-                if !data.worktree_name_exists(&project_id, &candidate) {
-                    break candidate;
-                }
-                counter += 1;
-            }
-        } else {
-            issue_branch
+            base_name
         }
     } else {
         generate_unique_workspace_name(|n| {
@@ -1690,25 +1610,28 @@ pub async fn create_worktree(
     let created_at = now();
 
     // Emit creating event immediately
-    let creating_event = WorktreeCreatingEvent {
+    let mut creating_event = WorktreeCreatingEvent {
         id: worktree_id.clone(),
         project_id: project_id.clone(),
         name: name.clone(),
         path: worktree_path_str.clone(),
         branch: name.clone(),
-        pr_number: pr_context.as_ref().map(|ctx| ctx.number as u64),
-        issue_number: issue_context.as_ref().map(|ctx| ctx.number as u64),
-        security_alert_number: security_context.as_ref().map(|ctx| ctx.number as u64),
-        advisory_ghsa_id: advisory_context.as_ref().map(|ctx| ctx.ghsa_id.clone()),
+        pr_number: None,
+        issue_number: None,
+        security_alert_number: None,
+        advisory_ghsa_id: None,
         origin: worktree_origin.clone(),
         auto_open_in_jean,
     };
+    if let Some(ref source) = context_source {
+        source.apply_creating_event_fields(&mut creating_event);
+    }
     if let Err(e) = app.emit_all("worktree:creating", &creating_event) {
         log::error!("Failed to emit worktree:creating event: {e}");
     }
 
     // Create a pending worktree record to return immediately
-    let pending_worktree = Worktree {
+    let mut pending_worktree = Worktree {
         id: worktree_id.clone(),
         project_id: project_id.clone(),
         name: name.clone(),
@@ -1721,18 +1644,14 @@ pub async fn create_worktree(
         setup_script: None,
         setup_success: None,
         session_type: SessionType::Worktree,
-        pr_number: pr_context.as_ref().map(|ctx| ctx.number),
+        pr_number: None,
         pr_url: None,
-        issue_number: issue_context.as_ref().map(|ctx| ctx.number),
-        linear_issue_identifier: linear_context.as_ref().map(|ctx| ctx.identifier.clone()),
-        security_alert_number: security_context.as_ref().map(|ctx| ctx.number),
-        security_alert_url: security_context
-            .as_ref()
-            .and_then(|ctx| ctx.html_url.clone()),
-        advisory_ghsa_id: advisory_context.as_ref().map(|ctx| ctx.ghsa_id.clone()),
-        advisory_url: advisory_context
-            .as_ref()
-            .and_then(|ctx| ctx.html_url.clone()),
+        issue_number: None,
+        linear_issue_identifier: None,
+        security_alert_number: None,
+        security_alert_url: None,
+        advisory_ghsa_id: None,
+        advisory_url: None,
         cached_pr_status: None,
         cached_check_status: None,
         cached_behind_count: None,
@@ -1755,6 +1674,9 @@ pub async fn create_worktree(
         label: None,
         last_opened_at: None,
     };
+    if let Some(ref source) = context_source {
+        source.apply_worktree_fields(&mut pending_worktree);
+    }
 
     // Clone values for the background thread
     let app_clone = app.clone();
@@ -1767,12 +1689,7 @@ pub async fn create_worktree(
     let worktree_path_clone = worktree_path_str.clone();
     let base_clone = base.clone();
     let base_remote_clone = base_remote.clone();
-    let issue_context_clone = issue_context.clone();
-    let pr_context_clone = pr_context.clone();
-    let security_context_clone = security_context.clone();
-    let advisory_context_clone = advisory_context.clone();
-    let linear_context_clone = linear_context.clone();
-    let sentry_context_clone = sentry_context.clone();
+    let context_source_clone = context_source.clone();
     let worktree_origin_clone = worktree_origin.clone();
 
     // Spawn background thread for git operations
@@ -1786,6 +1703,28 @@ pub async fn create_worktree(
             let mut name_clone = name_clone;
             let mut worktree_path_clone = worktree_path_clone;
             log::trace!("Background: Creating git worktree {name_clone} at {worktree_path_clone}");
+
+            // WorktreePathExistsEvent/WorktreeBranchExistsEvent only carry
+            // issue/pr/security/advisory context (no linear/sentry) — this is a
+            // pre-existing gap in those structs, preserved as-is by this enum.
+            let (event_issue_ctx, event_pr_ctx, event_security_ctx, event_advisory_ctx): (
+                Option<IssueContext>,
+                Option<PullRequestContext>,
+                Option<SecurityAlertContext>,
+                Option<AdvisoryContext>,
+            ) = match &context_source_clone {
+                Some(WorktreeContextSource::Issue(ctx)) => (Some(ctx.clone()), None, None, None),
+                Some(WorktreeContextSource::PullRequest(ctx)) => {
+                    (None, Some(ctx.clone()), None, None)
+                }
+                Some(WorktreeContextSource::Security(ctx)) => {
+                    (None, None, Some(ctx.clone()), None)
+                }
+                Some(WorktreeContextSource::Advisory(ctx)) => {
+                    (None, None, None, Some(ctx.clone()))
+                }
+                _ => (None, None, None, None),
+            };
 
             // Fetch base branch if enabled, use origin/<base> for up-to-date start point.
             // If the base is only available as a remote-tracking branch (e.g. stacking on a
@@ -1834,7 +1773,10 @@ pub async fn create_worktree(
                 for _ in 0..10 {
                     let worktree_path = std::path::Path::new(&worktree_path_clone);
                     let has_path_conflict = worktree_path.exists();
-                    let has_branch_conflict = pr_context_clone.is_none()
+                    let has_branch_conflict = context_source_clone
+                        .as_ref()
+                        .and_then(|c| c.pr_context())
+                        .is_none()
                         && git::branch_exists(&project_path, &name_clone);
 
                     if !has_path_conflict && !has_branch_conflict {
@@ -1908,10 +1850,10 @@ pub async fn create_worktree(
                     suggested_name,
                     archived_worktree_id: archived_info.as_ref().map(|(id, _)| id.clone()),
                     archived_worktree_name: archived_info.map(|(_, name)| name),
-                    issue_context: issue_context_clone.clone(),
-                    pr_context: pr_context_clone.clone(),
-                    security_context: security_context_clone.clone(),
-                    advisory_context: advisory_context_clone.clone(),
+                    issue_context: event_issue_ctx.clone(),
+                    pr_context: event_pr_ctx.clone(),
+                    security_context: event_security_ctx.clone(),
+                    advisory_context: event_advisory_ctx.clone(),
                     origin: worktree_origin_clone.clone(),
                 };
                 if let Err(e) = app_clone.emit_all("worktree:path_exists", &path_exists_event) {
@@ -1933,7 +1875,7 @@ pub async fn create_worktree(
             // For PR context, we use a temp branch + gh pr checkout pattern
             // For other cases, check if branch already exists
             let (branch_for_worktree, temp_branch_to_delete, actual_branch_name) =
-                if let Some(ref ctx) = pr_context_clone {
+                if let Some(ctx) = context_source_clone.as_ref().and_then(|c| c.pr_context()) {
                     // Use temp branch for PR checkout pattern
                     let temp_branch = format!(
                         "pr-{}-temp-{}",
@@ -1971,10 +1913,10 @@ pub async fn create_worktree(
                             project_id: project_id_clone.clone(),
                             branch: name_clone.clone(),
                             suggested_name,
-                            issue_context: issue_context_clone.clone(),
-                            pr_context: pr_context_clone.clone(),
-                            security_context: security_context_clone.clone(),
-                            advisory_context: advisory_context_clone.clone(),
+                            issue_context: event_issue_ctx.clone(),
+                            pr_context: event_pr_ctx.clone(),
+                            security_context: event_security_ctx.clone(),
+                            advisory_context: event_advisory_ctx.clone(),
                             origin: worktree_origin_clone.clone(),
                         };
                         if let Err(e) =
@@ -2019,7 +1961,7 @@ pub async fn create_worktree(
             log::trace!("Background: Git worktree created successfully");
 
             // For PR context, run gh pr checkout to get the actual PR branch
-            let final_branch = if let Some(ref ctx) = pr_context_clone {
+            let final_branch = if let Some(ctx) = context_source_clone.as_ref().and_then(|c| c.pr_context()) {
                 log::trace!(
                     "Background: Running gh pr checkout {} for PR branch",
                     ctx.number
@@ -2102,238 +2044,119 @@ pub async fn create_worktree(
                 actual_branch_name
             };
 
-            // Write issue context file if provided (to shared git-context directory)
-            if let Some(ctx) = &issue_context_clone {
-                log::trace!(
-                    "Background: Writing issue context file for issue #{}",
-                    ctx.number
-                );
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
-                    if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
-                        if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
-                            log::warn!("Background: Failed to create git-context directory: {e}");
-                        } else {
-                            let context_file =
-                                contexts_dir.join(format!("{repo_key}-issue-{}.md", ctx.number));
-                            let context_content = format_issue_context_markdown(ctx);
-                            if let Err(e) = std::fs::write(&context_file, context_content) {
-                                log::warn!("Background: Failed to write issue context file: {e}");
-                            } else {
-                                // Add reference for this worktree
-                                if let Err(e) = add_issue_reference(
-                                    &app_clone,
-                                    &repo_key,
-                                    ctx.number,
-                                    &worktree_id_clone,
-                                ) {
-                                    log::warn!("Background: Failed to add issue reference: {e}");
+            // Write context file if provided (to shared git-context directory)
+            if let Some(ref source) = context_source_clone {
+                let context_label = match source {
+                    WorktreeContextSource::Issue(ctx) => format!("issue #{}", ctx.number),
+                    WorktreeContextSource::PullRequest(ctx) => format!("PR #{}", ctx.number),
+                    WorktreeContextSource::Security(ctx) => {
+                        format!("security alert #{}", ctx.number)
+                    }
+                    WorktreeContextSource::Advisory(ctx) => format!("advisory {}", ctx.ghsa_id),
+                    WorktreeContextSource::Linear(ctx) => {
+                        format!("Linear issue {}", ctx.identifier)
+                    }
+                    WorktreeContextSource::Sentry(ctx) => {
+                        format!("Sentry issue {}", ctx.short_id)
+                    }
+                };
+                log::trace!("Background: Writing context file for {context_label}");
+
+                match source {
+                    WorktreeContextSource::Issue(_)
+                    | WorktreeContextSource::PullRequest(_)
+                    | WorktreeContextSource::Security(_)
+                    | WorktreeContextSource::Advisory(_) => {
+                        if let Ok(repo_id) = get_repo_identifier(&project_path) {
+                            let repo_key = repo_id.to_key();
+                            if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
+                                if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
+                                    log::warn!(
+                                        "Background: Failed to create git-context directory: {e}"
+                                    );
+                                } else {
+                                    // PR needs its diff fetched before formatting, if not
+                                    // already present — the only provider-specific step
+                                    // that doesn't fit the generic path below.
+                                    let context_content =
+                                        if let WorktreeContextSource::PullRequest(ctx) = source {
+                                            if ctx.diff.is_none() {
+                                                log::debug!(
+                                                    "Background: Fetching diff for PR #{}",
+                                                    ctx.number
+                                                );
+                                                let gh = resolve_gh_binary(&app_clone);
+                                                let diff =
+                                                    get_pr_diff(&project_path, ctx.number, &gh)
+                                                        .ok();
+                                                let ctx_with_diff = PullRequestContext {
+                                                    diff,
+                                                    ..ctx.clone()
+                                                };
+                                                format_pr_context_markdown(&ctx_with_diff)
+                                            } else {
+                                                source.context_markdown()
+                                            }
+                                        } else {
+                                            source.context_markdown()
+                                        };
+
+                                    let context_file = contexts_dir
+                                        .join(source.context_file_name_github(&repo_key));
+                                    if let Err(e) = std::fs::write(&context_file, context_content)
+                                    {
+                                        log::warn!(
+                                            "Background: Failed to write context file: {e}"
+                                        );
+                                    } else {
+                                        if let Err(e) = source.add_reference_github(
+                                            &app_clone,
+                                            &repo_key,
+                                            &worktree_id_clone,
+                                        ) {
+                                            log::warn!(
+                                                "Background: Failed to add context reference: {e}"
+                                            );
+                                        }
+                                        log::trace!(
+                                            "Background: Context file written to {:?}",
+                                            context_file
+                                        );
+                                    }
                                 }
-                                log::trace!(
-                                    "Background: Issue context file written to {:?}",
-                                    context_file
-                                );
                             }
+                        } else {
+                            log::warn!("Background: Could not get repo identifier for context");
                         }
                     }
-                } else {
-                    log::warn!("Background: Could not get repo identifier for issue context");
-                }
-            }
-
-            // Write PR context file if provided (to shared git-context directory)
-            if let Some(ctx) = &pr_context_clone {
-                log::trace!("Background: Writing PR context file for PR #{}", ctx.number);
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
-                    if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
-                        if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
-                            log::warn!("Background: Failed to create git-context directory: {e}");
-                        } else {
-                            // Fetch the diff if not already present
-                            let gh = resolve_gh_binary(&app_clone);
-                            let ctx_with_diff = if ctx.diff.is_none() {
-                                log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&project_path, ctx.number, &gh).ok();
-                                PullRequestContext {
-                                    number: ctx.number,
-                                    title: ctx.title.clone(),
-                                    body: ctx.body.clone(),
-                                    head_ref_name: ctx.head_ref_name.clone(),
-                                    base_ref_name: ctx.base_ref_name.clone(),
-                                    comments: ctx.comments.clone(),
-                                    reviews: ctx.reviews.clone(),
-                                    diff,
-                                }
-                            } else {
-                                ctx.clone()
-                            };
-
-                            let context_file =
-                                contexts_dir.join(format!("{repo_key}-pr-{}.md", ctx.number));
-                            let context_content = format_pr_context_markdown(&ctx_with_diff);
-                            if let Err(e) = std::fs::write(&context_file, context_content) {
-                                log::warn!("Background: Failed to write PR context file: {e}");
-                            } else {
-                                // Add reference for this worktree
-                                if let Err(e) = add_pr_reference(
-                                    &app_clone,
-                                    &repo_key,
-                                    ctx.number,
-                                    &worktree_id_clone,
-                                ) {
-                                    log::warn!("Background: Failed to add PR reference: {e}");
-                                }
-                                log::trace!(
-                                    "Background: PR context file written to {:?}",
-                                    context_file
-                                );
-                            }
-                        }
-                    }
-                } else {
-                    log::warn!("Background: Could not get repo identifier for PR context");
-                }
-            }
-
-            // Write security context file if provided (to shared git-context directory)
-            if let Some(ctx) = &security_context_clone {
-                log::trace!(
-                    "Background: Writing security context file for alert #{}",
-                    ctx.number
-                );
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
-                    if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
-                        if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
-                            log::warn!("Background: Failed to create git-context directory: {e}");
-                        } else {
-                            let context_file =
-                                contexts_dir.join(format!("{repo_key}-security-{}.md", ctx.number));
-                            let context_content = format_security_context_markdown(ctx);
-                            if let Err(e) = std::fs::write(&context_file, context_content) {
+                    WorktreeContextSource::Linear(_) | WorktreeContextSource::Sentry(_) => {
+                        if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
+                            if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                                 log::warn!(
-                                    "Background: Failed to write security context file: {e}"
+                                    "Background: Failed to create git-context directory: {e}"
                                 );
                             } else {
-                                if let Err(e) = add_security_reference(
-                                    &app_clone,
-                                    &repo_key,
-                                    ctx.number,
-                                    &worktree_id_clone,
-                                ) {
-                                    log::warn!("Background: Failed to add security reference: {e}");
+                                let context_file = contexts_dir
+                                    .join(source.context_file_name_generic(&project_name));
+                                let context_content = source.context_markdown();
+                                if let Err(e) = std::fs::write(&context_file, context_content) {
+                                    log::warn!("Background: Failed to write context file: {e}");
+                                } else {
+                                    if let Err(e) = source.add_reference_generic(
+                                        &app_clone,
+                                        &project_name,
+                                        &worktree_id_clone,
+                                    ) {
+                                        log::warn!(
+                                            "Background: Failed to add context reference: {e}"
+                                        );
+                                    }
+                                    log::trace!(
+                                        "Background: Context file written to {:?}",
+                                        context_file
+                                    );
                                 }
-                                log::trace!(
-                                    "Background: Security context file written to {:?}",
-                                    context_file
-                                );
                             }
-                        }
-                    }
-                } else {
-                    log::warn!("Background: Could not get repo identifier for security context");
-                }
-            }
-
-            // Write advisory context file if provided (to shared git-context directory)
-            if let Some(ctx) = &advisory_context_clone {
-                log::trace!(
-                    "Background: Writing advisory context file for {}",
-                    ctx.ghsa_id
-                );
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
-                    if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
-                        if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
-                            log::warn!("Background: Failed to create git-context directory: {e}");
-                        } else {
-                            let context_file = contexts_dir
-                                .join(format!("{repo_key}-advisory-{}.md", ctx.ghsa_id));
-                            let context_content = format_advisory_context_markdown(ctx);
-                            if let Err(e) = std::fs::write(&context_file, context_content) {
-                                log::warn!(
-                                    "Background: Failed to write advisory context file: {e}"
-                                );
-                            } else {
-                                if let Err(e) = add_advisory_reference(
-                                    &app_clone,
-                                    &repo_key,
-                                    &ctx.ghsa_id,
-                                    &worktree_id_clone,
-                                ) {
-                                    log::warn!("Background: Failed to add advisory reference: {e}");
-                                }
-                                log::trace!(
-                                    "Background: Advisory context file written to {:?}",
-                                    context_file
-                                );
-                            }
-                        }
-                    }
-                } else {
-                    log::warn!("Background: Could not get repo identifier for advisory context");
-                }
-            }
-
-            // Write Linear issue context file if provided
-            if let Some(ctx) = &linear_context_clone {
-                log::trace!(
-                    "Background: Writing Linear issue context file for {}",
-                    ctx.identifier
-                );
-                if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
-                    if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
-                        log::warn!("Background: Failed to create git-context directory: {e}");
-                    } else {
-                        let identifier_lower = ctx.identifier.to_lowercase();
-                        let context_file = contexts_dir
-                            .join(format!("{project_name}-linear-{identifier_lower}.md"));
-                        let detail = linear_context_to_detail(ctx);
-                        let context_content = format_linear_issue_context_markdown(&detail);
-                        if let Err(e) = std::fs::write(&context_file, context_content) {
-                            log::warn!(
-                                "Background: Failed to write Linear issue context file: {e}"
-                            );
-                        } else {
-                            if let Err(e) = add_linear_reference(
-                                &app_clone,
-                                &project_name,
-                                &ctx.identifier,
-                                &worktree_id_clone,
-                            ) {
-                                log::warn!("Background: Failed to add Linear reference: {e}");
-                            }
-                            log::trace!(
-                                "Background: Linear issue context file written to {:?}",
-                                context_file
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Write Sentry issue context file if provided
-            if let Some(ctx) = &sentry_context_clone {
-                log::trace!(
-                    "Background: Writing Sentry issue context file for {}",
-                    ctx.short_id
-                );
-                if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
-                    if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
-                        log::warn!("Background: Failed to create git-context directory: {e}");
-                    } else {
-                        let context_file =
-                            contexts_dir.join(format!("{project_name}-sentry-{}.md", ctx.id));
-                        if let Err(e) = std::fs::write(&context_file, &ctx.content) {
-                            log::warn!("Background: Failed to write Sentry context file: {e}");
-                        } else if let Err(e) = add_sentry_reference(
-                            &app_clone,
-                            &project_name,
-                            &ctx.id,
-                            &worktree_id_clone,
-                        ) {
-                            log::warn!("Background: Failed to add Sentry reference: {e}");
                         }
                     }
                 }
@@ -2359,7 +2182,7 @@ pub async fn create_worktree(
 
                 // Create the worktree record (setup_script set if jean.json has one,
                 // but setup_output is None — signals "setup pending" to frontend)
-                let worktree = Worktree {
+                let mut worktree = Worktree {
                     id: worktree_id_clone.clone(),
                     project_id: project_id_clone.clone(),
                     name: name_clone.clone(),
@@ -2372,22 +2195,14 @@ pub async fn create_worktree(
                     setup_script: pending_setup_script.clone(),
                     setup_success: None,
                     session_type: SessionType::Worktree,
-                    pr_number: pr_context_clone.as_ref().map(|ctx| ctx.number),
+                    pr_number: None,
                     pr_url: None,
-                    issue_number: issue_context_clone.as_ref().map(|ctx| ctx.number),
-                    linear_issue_identifier: linear_context_clone
-                        .as_ref()
-                        .map(|ctx| ctx.identifier.clone()),
-                    security_alert_number: security_context_clone.as_ref().map(|ctx| ctx.number),
-                    security_alert_url: security_context_clone
-                        .as_ref()
-                        .and_then(|ctx| ctx.html_url.clone()),
-                    advisory_ghsa_id: advisory_context_clone
-                        .as_ref()
-                        .map(|ctx| ctx.ghsa_id.clone()),
-                    advisory_url: advisory_context_clone
-                        .as_ref()
-                        .and_then(|ctx| ctx.html_url.clone()),
+                    issue_number: None,
+                    linear_issue_identifier: None,
+                    security_alert_number: None,
+                    security_alert_url: None,
+                    advisory_ghsa_id: None,
+                    advisory_url: None,
                     cached_pr_status: None,
                     cached_check_status: None,
                     cached_behind_count: None,
@@ -2410,6 +2225,9 @@ pub async fn create_worktree(
                     label: None,
                     last_opened_at: None,
                 };
+                if let Some(ref source) = context_source_clone {
+                    source.apply_worktree_fields(&mut worktree);
+                }
 
                 data.add_worktree(worktree.clone());
                 if let Err(e) = save_projects_data(&app_clone, &data) {

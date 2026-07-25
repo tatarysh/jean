@@ -14,6 +14,7 @@ pub mod saved_contexts;
 pub mod sentry_issues;
 pub mod storage;
 pub mod types;
+pub mod worktree_context;
 
 // Re-export commands for registration in lib.rs
 pub use commands::*;
@@ -24,3 +25,4 @@ pub use github_issues::*;
 pub use linear_issues::*;
 pub use saved_contexts::*;
 pub use sentry_issues::*;
+pub use worktree_context::*;

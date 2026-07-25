@@ -226,16 +226,21 @@ pub async fn dispatch_command(
             let custom_name = field_opt(&args, "customName", "custom_name")?;
             let auto_open_in_jean = field_opt(&args, "autoOpenInJean", "auto_open_in_jean")?;
             let origin = field_opt(&args, "origin", "origin")?;
+            // Combine the 6 per-provider context fields into one context source,
+            // preserving the original PR > security > advisory > linear > sentry >
+            // issue priority order in case more than one field is ever set.
+            let context_source = pr_context
+                .map(crate::projects::WorktreeContextSource::PullRequest)
+                .or_else(|| security_context.map(crate::projects::WorktreeContextSource::Security))
+                .or_else(|| advisory_context.map(crate::projects::WorktreeContextSource::Advisory))
+                .or_else(|| linear_context.map(crate::projects::WorktreeContextSource::Linear))
+                .or_else(|| sentry_context.map(crate::projects::WorktreeContextSource::Sentry))
+                .or_else(|| issue_context.map(crate::projects::WorktreeContextSource::Issue));
             let result = crate::projects::create_worktree(
                 app.clone(),
                 project_id,
                 base_branch,
-                issue_context,
-                pr_context,
-                security_context,
-                advisory_context,
-                linear_context,
-                sentry_context,
+                context_source,
                 custom_name,
                 auto_open_in_jean,
                 origin,
