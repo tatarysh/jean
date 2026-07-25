@@ -63,7 +63,7 @@ function GiteaErrorState({ error, label }: { error: Error; label: string }) {
       <div className="flex flex-col items-center justify-center py-8 px-4 text-center gap-2">
         <Settings className="h-5 w-5 text-muted-foreground" />
         <span className="text-sm text-muted-foreground">
-          Gitea isn't configured for this project yet.
+          Gitea isn&apos;t configured for this project yet.
         </span>
         <span className="text-xs text-muted-foreground">
           Add the instance URL, repository, and access token under Project

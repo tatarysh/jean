@@ -9,7 +9,14 @@ import type {
 import type { LinearIssue } from '@/types/linear'
 import type { SessionWithContext } from '../LoadContextItems'
 
-type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear'
+type TabId =
+  | 'issues'
+  | 'prs'
+  | 'security'
+  | 'contexts'
+  | 'linear'
+  | 'gitea-issues'
+  | 'gitea-prs'
 
 interface UseLoadContextKeyboardOptions {
   activeTab: TabId

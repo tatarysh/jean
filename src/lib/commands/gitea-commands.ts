@@ -1,4 +1,5 @@
 import { CircleDot, ExternalLink } from 'lucide-react'
+import type { QueryClient } from '@tanstack/react-query'
 import type { AppCommand } from './types'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
@@ -7,7 +8,7 @@ import { openExternal, preOpenWindow } from '@/lib/platform'
 import type { Project } from '@/types/projects'
 
 function getSelectedProjectWithGitea(
-  queryClient: import('@tanstack/react-query').QueryClient
+  queryClient: QueryClient
 ): Project | undefined {
   const { selectedProjectId } = useProjectsStore.getState()
   if (!selectedProjectId) return undefined
