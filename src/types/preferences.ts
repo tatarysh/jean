@@ -9,6 +9,11 @@ export interface MagicCodeReviewConfig {
   model: MagicPromptModel
   /** Explicit reasoning level for this backend/model pair. */
   reasoning_effort?: string | null
+  /**
+   * Execution mode for sessions created when sending this reviewer's findings
+   * to chat (Send to Chat / Send Separately). Defaults to plan when omitted.
+   */
+  fix_mode?: MagicPromptExecutionMode | null
 }
 
 // =============================================================================
@@ -1085,6 +1090,8 @@ export interface MagicPromptModes {
   investigate_advisory_mode: MagicPromptExecutionMode
   investigate_linear_issue_mode: MagicPromptExecutionMode
   investigate_sentry_issue_mode: MagicPromptExecutionMode
+  /** Mode for sessions created when sending code-review findings to fix */
+  code_review_fix_mode: MagicPromptExecutionMode
   review_comments_mode: MagicPromptExecutionMode
   final_review_mode: MagicPromptExecutionMode
   resolve_conflicts_mode: MagicPromptExecutionMode
@@ -1101,6 +1108,7 @@ export const DEFAULT_MAGIC_PROMPT_MODES: MagicPromptModes = {
   investigate_advisory_mode: 'plan',
   investigate_linear_issue_mode: 'plan',
   investigate_sentry_issue_mode: 'plan',
+  code_review_fix_mode: 'plan',
   review_comments_mode: 'plan',
   final_review_mode: 'yolo',
   resolve_conflicts_mode: 'yolo',
@@ -2381,7 +2389,7 @@ export const defaultPreferences: AppPreferences = {
   magic_prompt_backends: DEFAULT_MAGIC_PROMPT_BACKENDS,
   magic_prompt_efforts: DEFAULT_MAGIC_PROMPT_EFFORTS,
   magic_prompt_modes: DEFAULT_MAGIC_PROMPT_MODES,
-  file_edit_mode: 'external',
+  file_edit_mode: 'inline',
   ai_language: '', // Default: empty (Claude's default behavior)
   allow_web_tools_in_plan_mode: true, // Default: enabled
   waiting_sound: 'none',

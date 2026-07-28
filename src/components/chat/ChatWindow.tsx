@@ -114,7 +114,6 @@ import { normalizeTodosForDisplay } from './tool-call-utils'
 import { ImagePreview } from './ImagePreview'
 import { TextFilePreview } from './TextFilePreview'
 import { SkillBadge } from './SkillBadge'
-import { FileContentModal } from './FileContentModal'
 import { FilePreview } from './FilePreview'
 import { ChatInput } from './ChatInput'
 import { SessionDebugPanel } from './SessionDebugPanel'
@@ -238,6 +237,10 @@ const EMPTY_CONTENT_BLOCKS: ContentBlock[] = []
 const EMPTY_PENDING_IMAGES: PendingImage[] = []
 const EMPTY_PENDING_TEXT_FILES: PendingTextFile[] = []
 const EMPTY_PENDING_FILES: PendingFile[] = []
+
+// Process-wide count so remount races cannot leave reviewSurfaceMounted stuck true
+// (or false while another full-width review surface is still mounted).
+let reviewSurfaceMountCount = 0
 const EMPTY_PENDING_SKILLS: PendingSkill[] = []
 const EMPTY_QUEUED_MESSAGES: QueuedMessage[] = []
 const EMPTY_PERMISSION_DENIALS: PermissionDenial[] = []
@@ -465,6 +468,21 @@ export function ChatWindow({
     isMobile,
     isDedicatedEmptyCodeReview,
   ])
+
+  // Full-width review replaces the chat toolbar, so FloatingDock would reappear
+  // over the Send Separately / Send to Chat footer. Hide it while this surface
+  // is active (same mount-count pattern as ChatToolbar → chatToolbarMounted).
+  useEffect(() => {
+    if (!showReviewFullWidth) return
+    reviewSurfaceMountCount += 1
+    useUIStore.getState().setReviewSurfaceMounted(true)
+    return () => {
+      reviewSurfaceMountCount = Math.max(0, reviewSurfaceMountCount - 1)
+      if (reviewSurfaceMountCount === 0) {
+        useUIStore.getState().setReviewSurfaceMounted(false)
+      }
+    }
+  }, [showReviewFullWidth])
 
   useEffect(() => {
     const panel = reviewPanelRef.current
@@ -1237,8 +1255,8 @@ export function ChatWindow({
   // Drag and drop images into chat input
   const { isDragging } = useDragAndDropImages(activeSessionId)
 
-  // State for file content modal (opened by clicking filenames in tool calls)
-  const [viewingFilePath, setViewingFilePath] = useState<string | null>(null)
+  // File content modal is global (MainWindow) so the file browser can open it too
+  const setViewingFilePath = useUIStore(state => state.setViewingFilePath)
 
   // State for git diff modal (opened by clicking diff stats)
   const [diffRequest, setDiffRequest] = useState<DiffRequest | null>(null)
@@ -3729,12 +3747,6 @@ export function ChatWindow({
             )}
           </ResizablePanelGroup>
         )}
-
-        {/* File content modal for viewing files from tool calls */}
-        <FileContentModal
-          filePath={viewingFilePath}
-          onClose={() => setViewingFilePath(null)}
-        />
 
         {/* Git diff modal for viewing diffs */}
         <Suspense fallback={null}>

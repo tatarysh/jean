@@ -626,7 +626,7 @@ fn default_syntax_theme_light() -> String {
 }
 
 fn default_file_edit_mode() -> String {
-    "external".to_string() // Default to external editor (VS Code, etc.)
+    "inline".to_string() // Default to Jean's CodeMirror inline editor
 }
 
 fn default_parallel_execution_prompt_enabled() -> bool {
@@ -1269,6 +1269,8 @@ mod tests {
         );
         assert_eq!(prefs.magic_prompt_modes.investigate_issue_mode, "yolo");
         assert_eq!(prefs.magic_prompt_modes.review_comments_mode, "plan");
+        // Missing code_review_fix_mode in partial JSON falls back to plan
+        assert_eq!(prefs.magic_prompt_modes.code_review_fix_mode, "plan");
         assert_eq!(
             prefs.magic_prompt_models.final_review_model,
             default_model()
@@ -2179,6 +2181,10 @@ pub struct MagicCodeReviewConfig {
     pub model: String,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    /// Mode for sessions created when sending this reviewer's findings to chat.
+    /// Defaults to plan when missing from older prefs.
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub fix_mode: String,
 }
 
 fn default_sonnet_model() -> String {
@@ -2429,6 +2435,9 @@ pub struct MagicPromptModes {
     pub investigate_linear_issue_mode: String,
     #[serde(default = "default_magic_prompt_plan_mode")]
     pub investigate_sentry_issue_mode: String,
+    /// Mode for sessions created when sending code-review findings to fix
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub code_review_fix_mode: String,
     #[serde(default = "default_magic_prompt_plan_mode")]
     pub review_comments_mode: String,
     #[serde(default = "default_magic_prompt_yolo_mode")]
@@ -2451,6 +2460,7 @@ impl Default for MagicPromptModes {
             investigate_advisory_mode: default_magic_prompt_plan_mode(),
             investigate_linear_issue_mode: default_magic_prompt_plan_mode(),
             investigate_sentry_issue_mode: default_magic_prompt_plan_mode(),
+            code_review_fix_mode: default_magic_prompt_plan_mode(),
             review_comments_mode: default_magic_prompt_plan_mode(),
             final_review_mode: default_magic_prompt_yolo_mode(),
             resolve_conflicts_mode: default_magic_prompt_yolo_mode(),
@@ -2922,6 +2932,14 @@ pub struct UIState {
     #[serde(default)]
     pub left_sidebar_visible: Option<bool>,
 
+    /// File browser sidebar width in pixels, defaults to 280
+    #[serde(default)]
+    pub file_browser_size: Option<f64>,
+
+    /// File browser sidebar visibility, defaults to false
+    #[serde(default)]
+    pub file_browser_visible: Option<bool>,
+
     /// Active session ID per worktree (for restoring open tabs)
     #[serde(default)]
     pub active_session_ids: std::collections::HashMap<String, String>,
@@ -3124,6 +3142,8 @@ impl Default for UIState {
             expanded_folder_ids: Vec::new(),
             left_sidebar_size: None,
             left_sidebar_visible: None,
+            file_browser_size: None,
+            file_browser_visible: None,
             active_session_ids: std::collections::HashMap::new(),
             input_drafts: std::collections::HashMap::new(),
             pending_images: std::collections::HashMap::new(),
