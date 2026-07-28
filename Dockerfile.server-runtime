@@ -4,6 +4,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     openssh-client \
+    build-essential \
+    python3 \
+    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && corepack enable \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash jean \
     && mkdir -p /home/jean/.cache /home/jean/.config /home/jean/.local/share/com.jean.desktop \
